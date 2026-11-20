@@ -1,6 +1,7 @@
 import boto3
 import os
 import pandas as pd
+from botocore.exceptions import ClientError
 from io import StringIO
 
 COLUMNS = [
@@ -21,12 +22,10 @@ COLUMNS = [
 ]
 
 
-def upload_file_s3(df, file_name) -> bool:
-    """Upload a file to an S3 bucket
+def upload_file_s3(df, file_name) -> None:
+    """Upload a dataframe as CSV to an S3 object.
 
-    :param file_name: File to upload
-    :param object_name: S3 object name. If not specified then file_name is used
-    :return: True if file was uploaded, else False
+    Errors intentionally propagate so callers never mistake a failed write for success.
     """
 
     buffer = StringIO()
@@ -42,20 +41,15 @@ def upload_file_s3(df, file_name) -> bool:
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
     )
-    try:
-        s3_client.put_object(Bucket=bucket, Key=file_name, Body=buffer.getvalue())
-    except Exception as e:
-        print(e)
-        return False
-    return True
+    s3_client.put_object(Bucket=bucket, Key=file_name, Body=buffer.getvalue())
 
 
 def read_file_s3(file_name) -> pd.DataFrame:
-    """Read transaction list from an S3 bucket
+    """Read an S3 CSV object, returning an empty schema only when it is absent.
 
-    :param file_name: File to read
-    :param object_name: S3 object name. If not specified then file_name is used
-    :return: True if file was uploaded, else False
+    Authentication, networking, and service errors intentionally propagate so a
+    caller cannot overwrite existing data after mistaking a failed read for an
+    empty object.
     """
     access_key = os.getenv("S3_ACCESS_KEY")
     secret_key = os.getenv("S3_SECRET_KEY")
@@ -68,9 +62,10 @@ def read_file_s3(file_name) -> pd.DataFrame:
     )
     try:
         response = s3_client.get_object(Bucket=bucket_name, Key=file_name)
-        df = pd.read_csv(response["Body"])
-    except Exception as e:
-        print(e)
-        return pd.DataFrame(columns=COLUMNS)
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code")
+        if error_code in {"NoSuchKey", "404"}:
+            return pd.DataFrame(columns=COLUMNS)
+        raise
 
-    return df
+    return pd.read_csv(response["Body"])

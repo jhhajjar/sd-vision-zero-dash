@@ -90,6 +90,11 @@ def save_results(articles: List[Article]):
     concatted_df.drop_duplicates(subset=["unique_id"], inplace=True)
     duplicates = total_ - concatted_df.shape[0]
 
+    if len(concatted_df) < len(existing_data_df):
+        raise RuntimeError(
+            "Refusing to upload: result has fewer rows than the existing file"
+        )
+
     log(f"Found {duplicates} duplicates.")
     log(f"Saving {concatted_df.shape[0]} articles to AWS.")
 
